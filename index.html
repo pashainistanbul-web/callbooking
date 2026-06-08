@@ -17,30 +17,18 @@
     <link rel="apple-touch-startup-image" href="https://res.cloudinary.com/dobnqmfsg/image/upload/v1780237175/Untitled_jx2z0u.png">
     
     <link rel="icon" type="image/png" href="https://res.cloudinary.com/dobnqmfsg/image/upload/v1780062631/Untitled_design__3_-removebg-preview_qnvznn.png">
-    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="preload" href="https://res.cloudinary.com/dobnqmfsg/image/upload/v1780062631/Untitled_design__3_-removebg-preview_qnvznn.png" as="image">
+    <link rel="preload" href="styles.css" as="style">
+    <link rel="preload" href="https://unpkg.com/lucide@latest" as="script">
+
+    <link href="styles.css" rel="stylesheet">
+    
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.jsdelivr.net/npm/luxon@3.4.4/build/global/luxon.min.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.css"/>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.5.13/cropper.min.js"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['-apple-system', 'BlinkMacSystemFont', '"SF Pro Display"', '"SF Pro Text"', '"Segoe UI"', 'Roboto', 'Helvetica', 'Arial', 'sans-serif'],
-                    },
-                    keyframes: {
-                        'fade-in': { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-                        'zoom-in': { '0%': { opacity: '0', transform: 'scale(0.95)' }, '100%': { opacity: '1', transform: 'scale(1)' } }
-                    },
-                    animation: {
-                        'in': 'fade-in 0.2s ease-out, zoom-in 0.2s ease-out forwards',
-                    }
-                }
-            }
-        }
-    </script>
     <style>
         .uppercase { text-transform: capitalize !important; }
         
@@ -2551,7 +2539,55 @@
                 return;
             }
 
-            // Check if user is already logged in (active session)
+            // ZERO-LATENCY BOOT: Optimistically unhide the dashboard using cached tokens BEFORE waiting for the network
+            const localProfileData = localStorage.getItem('callcutz_user_profile');
+            const hasLocalSession = localStorage.getItem('sb-ikeyqwtrqaqogecvxmiq-auth-token'); 
+            
+            if (localProfileData && hasLocalSession) {
+                // Instantly drop the login screen and show the app shell
+                document.getElementById('page-login').classList.add('hidden');
+                document.getElementById('page-login').classList.remove('flex');
+                document.getElementById('sidebar').classList.add('hidden');
+                document.getElementById('sidebar').classList.add('md:flex');
+                document.getElementById('mainContent').classList.remove('hidden');
+                
+                try {
+                    currentUserProfile = JSON.parse(localProfileData);
+                    authUserId = currentUserProfile.id;
+                    
+                    // Populate initial visual state instantly
+                    const name = currentUserProfile.full_name || 'User';
+                    const firstName = name.split(' ')[0];
+                    const init = firstName.charAt(0).toUpperCase();
+                    
+                    document.getElementById('sidebar-user-name').innerText = name;
+                    const sidebarInitEl = document.getElementById('sidebar-user-init');
+                    if (currentUserProfile.avatar) {
+                        sidebarInitEl.innerText = '';
+                        sidebarInitEl.style.backgroundImage = `url(${currentUserProfile.avatar})`;
+                    } else {
+                        sidebarInitEl.innerText = init;
+                    }
+                    
+                    // Load offline snapshot to populate lists instantly so the user doesn't see a blank dashboard
+                    const snapshot = localStorage.getItem('callcutz_offline_snapshot');
+                    if (snapshot) {
+                        const parsed = JSON.parse(snapshot);
+                        teamMembers = parsed.teamMembers || [];
+                        dbMeetings = parsed.dbMeetings || [];
+                        dbAvailability = parsed.dbAvailability || [];
+                        
+                        const savedPage = localStorage.getItem('schedulr_active_page') || 'dashboard';
+                        showPage(savedPage);
+                        
+                        if (savedPage === 'dashboard') renderDashboard();
+                        if (savedPage === 'availability') initAvailability();
+                        if (savedPage === 'teamview') renderTeamGrid();
+                    }
+                } catch(e) { console.warn("Optimistic boot fallback, waiting for network..."); }
+            }
+
+            // Check if user is already logged in (active session validates silently in the background)
             const { data: sessionData } = await supabaseClient.auth.getSession();
             const session = sessionData?.session;
             
@@ -3106,10 +3142,10 @@
 
             availableGuests.forEach(m => {
                 const card = document.createElement('div');
-                card.className = "p-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 cursor-pointer transition-all flex items-center space-x-3 overflow-hidden";
+                card.className = "p-3 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 cursor-pointer transition-all flex items-center space-x-3";
                 card.innerHTML = `
                     <div class="w-10 h-10 rounded-full bg-white/10 text-white font-bold flex items-center justify-center shrink-0 overflow-hidden bg-cover bg-center" ${m.avatar ? `style="background-image: url(${m.avatar})"` : ''}>${m.avatar ? '' : m.init}</div>
-                    <div class="flex flex-col text-left flex-1 min-w-0">
+                    <div class="flex flex-col text-left min-w-0 flex-1">
                         <h4 class="text-xs font-bold capitalize tracking-tight truncate w-full">${m.name}</h4>
                         <p class="text-[9px] text-white/40 capitalize tracking-widest truncate w-full">${m.role}</p>
                     </div>
@@ -4989,18 +5025,20 @@ async function deleteMeeting(id, skipWebhook = false) {
                     <div class="user-card-row relative flex flex-col md:flex-row md:items-center justify-between p-3.5 md:p-3 rounded-xl md:rounded-lg bg-white/[0.02] md:bg-white/5 border border-transparent md:border-white/5 md:hover:bg-white/10 transition-colors z-0 gap-3 md:gap-0 mt-1">
                         <div class="absolute inset-0 rounded-xl border-[1.5px] border-transparent md:hidden pointer-events-none" style="background: linear-gradient(to bottom right, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0.0) 60%) border-box; -webkit-mask: linear-gradient(#fff 0 0) padding-box, linear-gradient(#fff 0 0); -webkit-mask-composite: destination-out; mask-composite: exclude; z-index: -1;"></div>
                         
-                        <div class="relative flex items-start justify-between w-full md:w-[50%] z-10 shrink-0 min-w-0">
-                            <div class="flex flex-col flex-1 min-w-0 pr-2">
+                        <div class="relative flex items-start w-full md:w-[50%] z-10 shrink-0 min-w-0">
+                            <div class="flex flex-col w-1/2 md:flex-1 min-w-0 pr-2">
                                 <span class="text-sm md:text-sm font-bold text-white capitalize tracking-wide truncate block w-full">${displayName}</span>
                                 <span class="text-[10px] md:text-[9px] text-white/60 lowercase tracking-widest mt-0.5 truncate block w-full">${user.email || ''}</span>
                             </div>
-                            <div class="relative flex justify-end items-center shrink-0 translate-x-1 md:translate-x-4 pt-0.5">
-                                <span id="role-display-${user.email ? user.email.replace(/[@.]/g, '-') : ''}" onclick="openRoleEdit('${user.email}', '${user.role || ''}', event)" class="text-[10px] text-white/40 uppercase tracking-widest text-right cursor-pointer md:hover:text-white md:hover:bg-white/10 px-2 py-0.5 rounded-md border border-transparent transition-all truncate max-w-[80px] md:max-w-[100px]">${user.role || 'SET ROLE'}</span>
-                                <input type="text" id="role-input-${user.email ? user.email.replace(/[@.]/g, '-') : ''}" onblur="saveUserRole('${user.email}', this.value, event)" onkeydown="if(event.key === 'Enter') this.blur()" class="hidden absolute right-0 bg-white/10 text-white text-[10px] uppercase font-bold tracking-widest text-center rounded-md border border-white/20 md:border-white/50 px-2 py-1 w-24 focus:outline-none focus:ring-0 md:focus:ring-1 focus:border-white/40 md:focus:border-white focus:bg-white/5 md:focus:bg-white/20 transition-all z-10" value="${user.role || ''}">
+                            <div class="flex items-start justify-between w-1/2 md:w-auto shrink-0 pl-1 md:pl-0">
+                                <div class="relative flex justify-center items-center shrink-0 md:translate-x-4 w-[85px] md:w-[100px] h-[24px]">
+                                    <span id="role-display-${user.email ? user.email.replace(/[@.]/g, '-') : ''}" onclick="openRoleEdit('${user.email}', '${user.role || ''}', event)" class="text-[10px] text-white/40 uppercase tracking-widest text-center cursor-pointer md:hover:text-white md:hover:bg-white/10 px-1 rounded-md border border-transparent transition-colors truncate block w-full">${user.role || 'SET ROLE'}</span>
+                                    <input type="text" id="role-input-${user.email ? user.email.replace(/[@.]/g, '-') : ''}" onblur="saveUserRole('${user.email}', this.value, event)" onkeydown="if(event.key === 'Enter') this.blur()" class="hidden absolute inset-0 w-full h-full px-1 bg-white/10 text-white text-[10px] uppercase font-bold tracking-widest text-center rounded-md border border-white/20 focus:border-white/50 focus:bg-white/20 focus:outline-none focus:ring-0 transition-colors duration-300 z-10" value="${user.role || ''}">
+                                </div>
+                                <button onclick="showUserDeleteConfirm('${user.email}')" class="p-1.5 text-red-400 md:hover:text-white md:hover:bg-white/10 rounded transition-colors md:hidden shrink-0 z-20 -mr-1" title="Delete User">
+                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                </button>
                             </div>
-                            <button onclick="showUserDeleteConfirm('${user.email}')" class="p-1.5 text-red-400 md:hover:text-white md:hover:bg-white/10 rounded transition-colors md:hidden ml-1 shrink-0 z-20" title="Delete User">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
                         </div>
                         
                         <div class="flex items-center w-full md:w-[50%] z-10 gap-2 md:gap-0 mt-1 md:mt-0">
